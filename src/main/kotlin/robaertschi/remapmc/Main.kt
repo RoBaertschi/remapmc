@@ -52,12 +52,21 @@ data class PackageVersion(
     val assetIndex: AssetIndex,
     val assets: String,
     val complianceLevel: Int,
-    val downloads: Map<String, Download>,
+    val downloads: MCDownloads,
     val id: String,
-
+    val javaVersion: JavaVersion,
+    val libraries: Array<Library>,
+    val logging: Logging,
+    val mainClass: String,
+    val minimumLauncherVersion: Int,
+    val releaseTime: Date,
+    val time: Date,
+    val type: VersionManifestV2.VersionType
 ) {
+    data class MCDownloads(val client: Download, val client_mappings: Download, val server: Download, val server_mappings: Download)
     data class Download(val sha1: String, val size: Int, val url: URL)
-    data class Arguments(val game: Array<String>, val jvm: Array<String>) {
+    // TODO: Add proper types, instead of any use String and a rule
+    data class Arguments(val game: Array<Any>, val jvm: Array<Any>) {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (javaClass != other?.javaClass) return false
@@ -77,6 +86,55 @@ data class PackageVersion(
         }
     }
     data class AssetIndex(val id: String, val sha1: String, val size: Int, val totalSize: Int, val url: URL)
+    data class JavaVersion(val component: String, val majorVersion: Int)
+    data class Library(val downloads: Downloads, val rules: Any)
+    data class Downloads(val artifact: Artifact, val name: String)
+    data class Artifact(val path: String, val sha1: String, val size: Int)
+    data class Logging(val client: ClientLogging)
+    data class ClientLogging(val argument: String, val file: LoggingFile, val type: String)
+    data class LoggingFile(val id: String, val sha1: String, val size: Int)
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as PackageVersion
+
+        if (arguments != other.arguments) return false
+        if (assetIndex != other.assetIndex) return false
+        if (assets != other.assets) return false
+        if (complianceLevel != other.complianceLevel) return false
+        if (downloads != other.downloads) return false
+        if (id != other.id) return false
+        if (javaVersion != other.javaVersion) return false
+        if (!libraries.contentEquals(other.libraries)) return false
+        if (logging != other.logging) return false
+        if (mainClass != other.mainClass) return false
+        if (minimumLauncherVersion != other.minimumLauncherVersion) return false
+        if (releaseTime != other.releaseTime) return false
+        if (time != other.time) return false
+        if (type != other.type) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = arguments.hashCode()
+        result = 31 * result + assetIndex.hashCode()
+        result = 31 * result + assets.hashCode()
+        result = 31 * result + complianceLevel
+        result = 31 * result + downloads.hashCode()
+        result = 31 * result + id.hashCode()
+        result = 31 * result + javaVersion.hashCode()
+        result = 31 * result + libraries.contentHashCode()
+        result = 31 * result + logging.hashCode()
+        result = 31 * result + mainClass.hashCode()
+        result = 31 * result + minimumLauncherVersion
+        result = 31 * result + releaseTime.hashCode()
+        result = 31 * result + time.hashCode()
+        result = 31 * result + type.hashCode()
+        return result
+    }
 
 }
 
@@ -107,10 +165,12 @@ fun remap(mapping: Path, input: Path, output: Path, from: String, to: String, cl
     builder.withMappings { out -> classMappings.forEach(out::acceptClass) }
     val remapper = builder.build()
 
-    OutputConsumerPath.Builder(output).build().use {
+    OutputConsumerPath.Builder(output).assumeArchive(true).build().use {
         consumer ->
         consumer.addNonClassFiles(input)
         remapper.readInputsAsync(input)
+        remapper.readClassPath(input)
+        remapper.apply(consumer)
         remapper.finish()
     }
 }
@@ -131,9 +191,12 @@ fun run(mcVersion: String) {
         logger.error { "Could not find minecraft with the version $mcVersion" }
         throw RuntimeException("Could not find minecraft with the version $mcVersion")
     }
+
+    val packageVersion = gson.fromJson(version.url.openStream().reader(), PackageVersion::class.java)
+
     val minecraftJar = dir.resolve("minecraft-client-$mcVersion.jar")
     if (!minecraftJar.exists()) {
-        download(version.url, minecraftJar)
+        download(packageVersion.downloads.client.url, minecraftJar)
     }
 
     val intermediaryPath = dir.resolve("minecraft-intermediary-$mcVersion.tiny")
@@ -202,6 +265,8 @@ fun run(mcVersion: String) {
     }
 
     // Remap
+    val intermediaryJar = dir.resolve("minecraft-client-intermediary-$mcVersion.jar")
+    remap(intermediaryPath, minecraftJar, intermediaryJar, "official", "intermediary", mapOf())
 
     logger.info { latestStable }
 }
