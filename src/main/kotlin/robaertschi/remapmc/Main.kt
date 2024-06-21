@@ -2,13 +2,26 @@ package robaertschi.remapmc
 
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
+import io.github.oshai.kotlinlogging.KLogger
 import io.github.oshai.kotlinlogging.KotlinLogging
+import io.github.oshai.kotlinlogging.Level
+import kotlinx.datetime.LocalDateTime
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import net.fabricmc.tinyremapper.OutputConsumerPath
 import net.fabricmc.tinyremapper.TinyRemapper
 import net.fabricmc.tinyremapper.TinyUtils
+import org.jetbrains.java.decompiler.api.Decompiler
+import org.jetbrains.java.decompiler.main.decompiler.DirectoryResultSaver
+import org.jetbrains.java.decompiler.main.extern.IFernflowerLogger
 import java.io.FileOutputStream
 import java.net.URI
-import java.net.URL
 import java.nio.channels.Channels
 import java.nio.file.Files
 import java.nio.file.Path
@@ -19,11 +32,30 @@ import java.util.zip.ZipFile
 import kotlin.io.path.exists
 
 
+typealias URL = @Serializable(UrlAsStringSerializer::class) java.net.URL;
+
+object UrlAsStringSerializer : KSerializer<URL> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("URL", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): URL {
+        val string = decoder.decodeString()
+        val uri = URI.create(string)
+        return uri.toURL()
+    }
+
+    override fun serialize(encoder: Encoder, value: URL) {
+        encoder.encodeString(value.toString())
+    }
+}
+
+
+
 data class YarnVersion(val gameVersion: String, val separator: String, val build: Int, val maven: String, val version: String, val stable: Boolean)
 data class VersionManifestV2(val latest: Latest, val versions: Array<Version>) {
+    @Serializable()
     enum class VersionType {
-        @SerializedName(value = "release") Release,
-        @SerializedName(value = "snapshot") Snapshot,
+        @SerialName("release") Release,
+        @SerialName("snapshot") Snapshot,
     }
     data class Latest(val release: String, val snapshot: String)
     data class Version(val id: String, val type: VersionType, val url: URL, val time: Date, val releaseTime: Date, val sha1: String, val complianceLevel: Int)
@@ -47,6 +79,7 @@ data class VersionManifestV2(val latest: Latest, val versions: Array<Version>) {
     }
 }
 
+@Serializable
 data class PackageVersion(
     val arguments: Arguments,
     val assetIndex: AssetIndex,
@@ -59,14 +92,79 @@ data class PackageVersion(
     val logging: Logging,
     val mainClass: String,
     val minimumLauncherVersion: Int,
-    val releaseTime: Date,
-    val time: Date,
+    val releaseTime: LocalDateTime,
+    val time: LocalDateTime,
     val type: VersionManifestV2.VersionType
 ) {
+    @Serializable
     data class MCDownloads(val client: Download, val client_mappings: Download, val server: Download, val server_mappings: Download)
+    @Serializable
     data class Download(val sha1: String, val size: Int, val url: URL)
-    // TODO: Add proper types, instead of any use String and a rule
-    data class Arguments(val game: Array<Any>, val jvm: Array<Any>) {
+
+    object RuleValueSerialize : KSerializer<RuleValue> {
+        override val descriptor: SerialDescriptor = SerialDescriptor()
+
+        override fun deserialize(decoder: Decoder): RuleValue {
+            TODO("Not yet implemented")
+        }
+
+        override fun serialize(encoder: Encoder, value: RuleValue) {
+            TODO("Not yet implemented")
+        }
+    }
+
+    @Serializable
+    data class RuleValue(val value: Array<String>) {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (javaClass != other?.javaClass) return false
+
+            other as RuleValue
+
+            return value.contentEquals(other.value)
+        }
+
+        override fun hashCode(): Int {
+            return value.contentHashCode()
+        }
+    }
+
+    @Serializable
+    data class GameRule(val action: String, val features: Features) {
+        @Serializable
+        data class Features(@SerialName("is_demo_user") val isDemoUser: Boolean?, @SerialName("has_custom_resolution") val hasCustomResolution: Boolean?)
+    }
+
+    @Serializable
+    data class Jvm(val rules: Array<JvmRule>, val value: Array<String>) {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (javaClass != other?.javaClass) return false
+
+            other as Jvm
+
+            if (!rules.contentEquals(other.rules)) return false
+            if (!value.contentEquals(other.value)) return false
+
+            return true
+        }
+
+        override fun hashCode(): Int {
+            var result = rules.contentHashCode()
+            result = 31 * result + value.contentHashCode()
+            return result
+        }
+    }
+
+    @Serializable
+    data class JvmRule(val action: String, val os: OS) {
+        @Serializable
+        data class OS(val name: String, val version: String, val arch: String)
+    }
+
+
+    @Serializable
+    data class Arguments(val game: Array<GameRule>, val jvm: Array<Jvm>) {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (javaClass != other?.javaClass) return false
@@ -85,13 +183,40 @@ data class PackageVersion(
             return result
         }
     }
+    @Serializable
     data class AssetIndex(val id: String, val sha1: String, val size: Int, val totalSize: Int, val url: URL)
+    @Serializable
     data class JavaVersion(val component: String, val majorVersion: Int)
-    data class Library(val downloads: Downloads, val rules: Any)
+    @Serializable
+    data class Library(val downloads: Downloads, val rules: Array<JvmRule>) {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (javaClass != other?.javaClass) return false
+
+            other as Library
+
+            if (downloads != other.downloads) return false
+            if (!rules.contentEquals(other.rules)) return false
+
+            return true
+        }
+
+        override fun hashCode(): Int {
+            var result = downloads.hashCode()
+            result = 31 * result + rules.contentHashCode()
+            return result
+        }
+    }
+
+    @Serializable
     data class Downloads(val artifact: Artifact, val name: String)
+    @Serializable
     data class Artifact(val path: String, val sha1: String, val size: Int)
+    @Serializable
     data class Logging(val client: ClientLogging)
+    @Serializable
     data class ClientLogging(val argument: String, val file: LoggingFile, val type: String)
+    @Serializable
     data class LoggingFile(val id: String, val sha1: String, val size: Int)
 
     override fun equals(other: Any?): Boolean {
