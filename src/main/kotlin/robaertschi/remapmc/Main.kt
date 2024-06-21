@@ -240,10 +240,12 @@ fun decompile(input: Path, output: Path) {
 fun run(mcVersion: String) {
 
     logger.info { "Starting to download yarn mappings for minecraft version $mcVersion" }
+    // Set this if something gets build
+    val rebuild = false;
 
     val gson = Gson()
     val dir = Paths.get("remapmc")
-    if (!dir.exists()) {
+    if (!dir.exists() || rebuild) {
         Files.createDirectory(dir)
     }
 
@@ -262,12 +264,12 @@ fun run(mcVersion: String) {
     }
 
     val minecraftJar = dir.resolve("minecraft-client-$mcVersion.jar")
-    if (!minecraftJar.exists()) {
+    if (!minecraftJar.exists() || rebuild) {
         download(packageVersion.downloads.client.url, minecraftJar)
     }
 
     val intermediaryPath = dir.resolve("minecraft-intermediary-$mcVersion.tiny")
-    if (!intermediaryPath.exists()) {
+    if (!intermediaryPath.exists() || rebuild) {
         download(
             "https://github.com/FabricMC/intermediary/raw/master/mappings/$mcVersion.tiny",
             intermediaryPath
@@ -290,7 +292,7 @@ fun run(mcVersion: String) {
     }
 
     val yarnPath = dir.resolve("yarn-${latestStable.version}-mergedv2.jar")
-    if (!yarnPath.exists()) {
+    if (!yarnPath.exists() || rebuild) {
         download(
             "https://maven.fabricmc.net/net/fabricmc/yarn/${latestStable.version}/yarn-${latestStable.version}-mergedv2.jar",
             yarnPath
@@ -298,7 +300,7 @@ fun run(mcVersion: String) {
     }
 
     val unzipDir = dir.resolve("yarn-${latestStable.version}")
-    if (!unzipDir.exists()) {
+    if (!unzipDir.exists() || rebuild) {
         try {
 
             Files.createDirectory(unzipDir)
@@ -333,14 +335,17 @@ fun run(mcVersion: String) {
 
     // Remap
     val intermediaryJar = dir.resolve("minecraft-client-intermediary-$mcVersion.jar")
-    remap(intermediaryPath, minecraftJar, intermediaryJar, "official", "intermediary", mapOf())
+    if (!intermediaryJar.exists() || rebuild)
+        remap(intermediaryPath, minecraftJar, intermediaryJar, "official", "intermediary", mapOf())
 
     val yarnJar = dir.resolve("minecraft-client-yarn-$mcVersion.jar")
     val yarnTiny = unzipDir.resolve("mappings/mappings.tiny")
-    remap(yarnTiny, intermediaryJar, yarnJar, "intermediary", "named", mapOf())
+    if (!yarnJar.exists() || rebuild)
+        remap(yarnTiny, intermediaryJar, yarnJar, "intermediary", "named", mapOf())
 
     val decompiledOutput = dir.resolve("minecraft-source")
-    decompile(yarnJar, decompiledOutput)
+    if(!decompiledOutput.exists() || rebuild)
+        decompile(yarnJar, decompiledOutput)
 
     logger.info { latestStable }
 }
