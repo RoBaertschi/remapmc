@@ -2,10 +2,15 @@ package robaertschi.remapmc
 
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
+import io.github.oshai.kotlinlogging.KLogger
 import io.github.oshai.kotlinlogging.KotlinLogging
+import io.github.oshai.kotlinlogging.Level
 import net.fabricmc.tinyremapper.OutputConsumerPath
 import net.fabricmc.tinyremapper.TinyRemapper
 import net.fabricmc.tinyremapper.TinyUtils
+import org.jetbrains.java.decompiler.api.Decompiler
+import org.jetbrains.java.decompiler.main.decompiler.DirectoryResultSaver
+import org.jetbrains.java.decompiler.main.extern.IFernflowerLogger
 import java.io.FileOutputStream
 import java.net.URI
 import java.net.URL
