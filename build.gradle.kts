@@ -1,5 +1,6 @@
 plugins {
-    kotlin("jvm") version "1.9.23"
+    kotlin("jvm") version "2.0.0"
+    kotlin("plugin.serialization") version "2.0.0"
     application
 }
 
@@ -21,6 +22,9 @@ dependencies {
     implementation("ch.qos.logback:logback-core:1.5.6")
     implementation("ch.qos.logback:logback-classic:1.5.6")
     implementation("org.slf4j:slf4j-api:2.0.13")
+    implementation("org.vineflower:vineflower:1.10.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.0")
     //implementation("org.slf4j:slf4j-simple:2.0.13")
     testImplementation(kotlin("test"))
 }
@@ -31,6 +35,8 @@ tasks.test {
 kotlin {
     jvmToolchain(21)
 }
+
+
 
 application {
     mainClass = "robaertschi.remapmc.MainKt"

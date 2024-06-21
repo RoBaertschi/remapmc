@@ -138,6 +138,14 @@ data class PackageVersion(
 
 }
 
+fun logThrowable(logger: KLogger, exception: Throwable, level: Level = Level.ERROR) {
+    logger.at(level) { this.message = "Error: The follow exception occurred: ${exception.message}" }
+
+    if (exception.cause != null)
+        logger.at(level) { this.message = "With the following cause: ${exception.cause}" }
+    logger.at(level) { this.message = "Stacktrace: ${exception.stackTraceToString()}" }
+}
+
 val logger = KotlinLogging.logger {  }
 val downloadLogger = KotlinLogging.logger("download")
 
@@ -153,7 +161,11 @@ fun download(url: URL, outputFile: Path) {
     downloadLogger.info { "Download successfully finished" }
 }
 
+val remapLogger = KotlinLogging.logger("remapping")
 fun remap(mapping: Path, input: Path, output: Path, from: String, to: String, classMappings: Map<String, String>) {
+    remapLogger.info { "Starting remapping, mapping: $mapping, input: $input, output: $output, from: $from, to: $to, classMappings: $classMappings" }
+
+
     val builder = TinyRemapper.newRemapper()
         .withMappings ( TinyUtils.createTinyMappingProvider(mapping, from, to) )
         .renameInvalidLocals(true)
@@ -168,11 +180,56 @@ fun remap(mapping: Path, input: Path, output: Path, from: String, to: String, cl
     OutputConsumerPath.Builder(output).assumeArchive(true).build().use {
         consumer ->
         consumer.addNonClassFiles(input)
+        remapLogger.debug{ "Added $input to consumer" }
         remapper.readInputsAsync(input)
+        remapLogger.debug { "Added $input to remapper inputs" }
         remapper.readClassPath(input)
+        remapLogger.debug { "Added $input to remapper classpath" }
         remapper.apply(consumer)
+        remapLogger.debug { "Applied the consumer to the remapper" }
         remapper.finish()
     }
+    remapLogger.info { "Successfully remapped $input to $output" }
+}
+
+var decompileOutput = true
+
+fun decompile(input: Path, output: Path) {
+    val decompiler = Decompiler.builder()
+        .output(DirectoryResultSaver(output.toFile()))
+        .inputs(input.toFile())
+        .logger(object : IFernflowerLogger() {
+            val logger = KotlinLogging.logger("decompilation")
+            override fun writeMessage(p0: String, p1: Severity) {
+                if (!decompileOutput) return
+                this.writeMessage(p0, p1, null)
+            }
+
+            override fun writeMessage(message: String, severity: Severity, error: Throwable?) {
+                if (!decompileOutput) return
+                if (error == null) {
+                    return when(severity) {
+                        Severity.INFO -> logger.info { message }
+                        Severity.WARN -> logger.warn { message }
+                        Severity.ERROR -> logger.error { message }
+                        Severity.TRACE -> logger.trace { message }
+                    }
+                } else {
+                    logThrowable(logger, error, severity.run {
+                        when(this) {
+                            Severity.ERROR -> Level.ERROR
+                            Severity.WARN -> Level.WARN
+                            Severity.INFO -> Level.INFO
+                            Severity.TRACE -> Level.TRACE
+                        }
+                    })
+                }
+            }
+
+        })
+        .build()
+
+    decompiler.decompile()
 }
 
 fun run(mcVersion: String) {
@@ -193,6 +250,11 @@ fun run(mcVersion: String) {
     }
 
     val packageVersion = gson.fromJson(version.url.openStream().reader(), PackageVersion::class.java)
+    if (packageVersion == null) {
+
+        logger.error { "Could not get package version for $mcVersion" }
+        throw RuntimeException("Could not get package version for $mcVersion")
+    }
 
     val minecraftJar = dir.resolve("minecraft-client-$mcVersion.jar")
     if (!minecraftJar.exists()) {
@@ -268,6 +330,13 @@ fun run(mcVersion: String) {
     val intermediaryJar = dir.resolve("minecraft-client-intermediary-$mcVersion.jar")
     remap(intermediaryPath, minecraftJar, intermediaryJar, "official", "intermediary", mapOf())
 
+    val yarnJar = dir.resolve("minecraft-client-yarn-$mcVersion.jar")
+    val yarnTiny = unzipDir.resolve("mappings/mappings.tiny")
+    remap(yarnTiny, intermediaryJar, yarnJar, "intermediary", "named", mapOf())
+
+    val decompiledOutput = dir.resolve("minecraft-source")
+    decompile(yarnJar, decompiledOutput)
+
     logger.info { latestStable }
 }
 
@@ -289,9 +358,6 @@ fun main(args: Array<String>) {
         run(mcversion)
         logger.info { "Successfully remapped and decompiled MC. Look in the new 'remapmc' folder" }
     } catch (e: Exception) {
-        logger.error { "Error: The follow exception occurred: ${e.message}"}
-        if (e.cause != null)
-            logger.error { "With the following cause: ${e.cause}" }
-        logger.error { "Stacktrace: ${e.stackTraceToString()}" }
+        logThrowable(logger, e)
     }
 }
